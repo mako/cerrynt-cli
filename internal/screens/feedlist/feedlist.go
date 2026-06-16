@@ -75,7 +75,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 // View renders the feed list as a string. Bubble Tea calls this after every
 // Update() and replaces the terminal output with the result.
 func (m Model) View() string {
-	s := styles.Title.Render("Feeds") + "\n"
+	s := styles.Title.Render("Feeds") + "\n\n"
 
 	for i, feed := range m.feeds {
 		var unread string
@@ -99,7 +99,7 @@ func (m Model) View() string {
 	if len(m.feeds) > 0 {
 		pos = fmt.Sprintf("[%d/%d]  ", m.cursor+1, len(m.feeds))
 	}
-	s += styles.StatusBar.Render(pos + "j/k move  •  enter open  •  q quit")
+	s += "\n" + styles.StatusBar.Render(pos+"j/k move  •  enter open  •  q quit")
 
 	return s
 }

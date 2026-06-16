@@ -18,53 +18,44 @@ import (
 // BackMsg is emitted when the user presses ESC to return to the article list.
 type BackMsg struct{}
 
-// statusBarHeight is the number of terminal rows consumed by the status bar.
-// styles.StatusBar has MarginTop(1), so it renders as a blank line + the bar itself.
-const statusBarHeight = 2
-
 // Model is the Bubble Tea model for the article view screen.
 type Model struct {
 	article domain.Article
 	width   int
 	height  int
-	offset  int // first visible line index (scroll position)
+	offset  int // index of the first visible line
 }
 
 // New constructs an articleview Model. width and height should be the current
-// terminal dimensions so that word-wrap and scrolling are correct from the first render.
+// terminal dimensions so word-wrap and scrolling are correct from the first render.
 func New(article domain.Article, width, height int) Model {
-	return Model{
-		article: article,
-		width:   width,
-		height:  height,
-	}
+	return Model{article: article, width: width, height: height}
 }
 
-// Init satisfies tea.Model. No startup commands needed.
+// Init satisfies tea.Model.
 func (m Model) Init() tea.Cmd {
 	return nil
 }
 
-// Update handles key input and window resize events.
+// Update handles key input and window resize.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		// Clamp offset in case the window shrunk.
-		m.offset = m.clampOffset(m.offset)
+		// Re-clamp in case content is now fully visible after a resize.
+		m.offset = clamp(m.offset, 0, maxOffset(m.buildLines(), m.height))
 		return m, nil
 
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, keymap.Default.Down):
-			m.offset = m.clampOffset(m.offset + 1)
+			lines := m.buildLines()
+			m.offset = clamp(m.offset+1, 0, maxOffset(lines, m.height))
 
 		case key.Matches(msg, keymap.Default.Up):
-			if m.offset > 0 {
-				m.offset--
-			}
+			m.offset = clamp(m.offset-1, 0, maxOffset(m.buildLines(), m.height))
 
 		case key.Matches(msg, keymap.Default.Back):
 			return m, func() tea.Msg { return BackMsg{} }
@@ -74,18 +65,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// View renders the visible portion of the article content plus a status bar.
+// View renders the visible window of content and a status bar.
 func (m Model) View() string {
 	lines := m.buildLines()
 
-	visible := m.height - statusBarHeight
+	// The status bar occupies 2 rows: a blank separator line + the bar text.
+	// This constant must match the literal "\n\n" prefix in the return below.
+	const statusRows = 2
+	visible := m.height - statusRows
 	if visible < 1 {
 		visible = 1
 	}
 
-	// Clamp again at render time in case dimensions changed between Update calls.
-	offset := m.clampOffset(m.offset)
-
+	offset := clamp(m.offset, 0, maxOffset(lines, m.height))
 	end := offset + visible
 	if end > len(lines) {
 		end = len(lines)
@@ -93,44 +85,57 @@ func (m Model) View() string {
 
 	content := strings.Join(lines[offset:end], "\n")
 
-	return content + "\n" + styles.StatusBar.Render(m.statusBarText(lines, visible, offset))
+	// Build status bar text.
+	max := maxOffset(lines, m.height)
+	var bar string
+	if max > 0 {
+		// Content is taller than the screen — show a scroll percentage.
+		pct := offset * 100 / max
+		bar = fmt.Sprintf("[%d%%]  j/k scroll  •  esc back  •  q quit", pct)
+	} else {
+		bar = "esc back  •  q quit"
+	}
+
+	// "\n\n" = blank separator line between content and status bar (= statusRows).
+	return content + "\n\n" + styles.StatusBar.Render(bar)
 }
 
 // buildLines renders the full article into a flat slice of display lines.
-// This is used both by View() for rendering and by Update() for scroll clamping.
-//
-// Keeping rendering in one place means View() is a simple slice operation and
-// scroll position is always relative to the same line layout.
+// All layout decisions live here so View() is just a slice-and-join operation
+// and scroll position is always relative to a stable line numbering.
 func (m Model) buildLines() []string {
 	w := m.width
 	if w <= 0 {
 		w = 80
 	}
-	// Leave a small left margin so content is not flush against the edge.
-	wrapWidth := w - 2
-	if wrapWidth < 20 {
-		wrapWidth = 20
+	// Narrow by 2 so text does not press against the very edge of the terminal.
+	wrap := w - 2
+	if wrap < 20 {
+		wrap = 20
 	}
 
 	var lines []string
 
 	a := m.article
 
-	// Title — may span multiple lines on narrow terminals.
-	for _, l := range wordWrap(a.Title, wrapWidth) {
+	// Title: each word-wrapped line is its own slice element so that the
+	// scroll-window calculation in View() counts display rows correctly.
+	// styles.Title has no margin, so per-line rendering is safe.
+	for _, l := range wordWrap(a.Title, wrap) {
 		lines = append(lines, styles.Title.Render(l))
 	}
+	lines = append(lines, "") // blank line after title
 
 	// Metadata
 	lines = append(lines,
-		styles.Faint.Render(fmt.Sprintf("Published  %s", a.Published.Format("2 Jan 2006  15:04"))),
-		styles.Faint.Render(fmt.Sprintf("URL        %s", a.URL)),
-		"", // blank separator between metadata and body
+		styles.Faint.Render("Published  "+a.Published.Format("2 Jan 2006  15:04")),
+		styles.Faint.Render("URL        "+a.URL),
+		"", // blank line before body
 	)
 
 	// Body
 	if a.Summary != "" {
-		lines = append(lines, wordWrap(a.Summary, wrapWidth)...)
+		lines = append(lines, wordWrap(a.Summary, wrap)...)
 	} else {
 		lines = append(lines, styles.Faint.Render("No summary available."))
 	}
@@ -138,48 +143,32 @@ func (m Model) buildLines() []string {
 	return lines
 }
 
-// clampOffset ensures offset is within the valid scroll range.
-func (m Model) clampOffset(offset int) int {
-	lines := m.buildLines()
-	visible := m.height - statusBarHeight
+// maxOffset returns the maximum valid scroll offset for a given line count
+// and terminal height. Returns 0 if all content fits on screen.
+func maxOffset(lines []string, height int) int {
+	const statusRows = 2
+	visible := height - statusRows
 	if visible < 1 {
 		visible = 1
 	}
-	max := len(lines) - visible
-	if max < 0 {
-		max = 0
-	}
-	if offset > max {
+	if max := len(lines) - visible; max > 0 {
 		return max
 	}
-	if offset < 0 {
-		return 0
-	}
-	return offset
+	return 0
 }
 
-// statusBarText builds the status bar content, including a scroll percentage
-// when the content is longer than the visible area.
-func (m Model) statusBarText(lines []string, visible, offset int) string {
-	hint := "esc back  •  q quit"
-
-	if len(lines) <= visible {
-		// All content fits — no scroll indicator needed.
-		return hint
+// clamp returns v clamped to [lo, hi].
+func clamp(v, lo, hi int) int {
+	if v < lo {
+		return lo
 	}
-
-	max := len(lines) - visible
-	pct := 0
-	if max > 0 {
-		pct = offset * 100 / max
+	if v > hi {
+		return hi
 	}
-
-	return fmt.Sprintf("[%d%%]  j/k scroll  •  %s", pct, hint)
+	return v
 }
 
 // wordWrap breaks text into lines of at most width characters on word boundaries.
-// It returns a slice of lines rather than a joined string, so callers can
-// treat each line individually (for scrolling, styling, etc.).
 func wordWrap(text string, width int) []string {
 	words := strings.Fields(text)
 	if len(words) == 0 {

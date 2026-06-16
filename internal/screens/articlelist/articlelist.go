@@ -107,7 +107,7 @@ func (m Model) View() string {
 	if unread > 0 {
 		subtitle = fmt.Sprintf(" — %d unread", unread)
 	}
-	s := styles.Title.Render(m.feed.Title+subtitle) + "\n"
+	s := styles.Title.Render(m.feed.Title+subtitle) + "\n\n"
 
 	if len(m.articles) == 0 {
 		s += styles.Faint.Render("  No articles.") + "\n"
@@ -130,7 +130,7 @@ func (m Model) View() string {
 	if len(m.articles) > 0 {
 		pos = fmt.Sprintf("[%d/%d]  ", m.cursor+1, len(m.articles))
 	}
-	s += styles.StatusBar.Render(pos + "j/k move  •  enter open  •  esc back  •  q quit")
+	s += "\n" + styles.StatusBar.Render(pos+"j/k move  •  enter open  •  esc back  •  q quit")
 
 	return s
 }
