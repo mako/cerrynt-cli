@@ -1,0 +1,39 @@
+# Binaries
+/cerrynt
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go build output
+/bin/
+/dist/
+/build/
+
+# Test / coverage
+*.out
+coverage.txt
+
+# Go modules cache (rare but safe)
+go.work
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+
+# Optional: local config (later for XDG)
+.config/
