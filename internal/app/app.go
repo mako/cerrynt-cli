@@ -3,11 +3,18 @@
 // and View() to whichever screen is currently showing.
 //
 // Navigation flow:
-//   FeedList → [Enter] → ArticleList → [Enter] → ArticleView
-//                              ↑ [ESC]                ↑ [ESC]
+//
+//	FeedList → [Enter] → ArticleList → [Enter] → ArticleView
+//	               ↑ [ESC]                  ↑ [ESC]
 //
 // Navigation is driven by typed messages: screens emit them, app receives
 // them and switches the active screen. Screens have no knowledge of each other.
+//
+// Read state is tracked here in readIDs and applied in two ways:
+//  1. Immediately: articleList.MarkRead() updates the live list so the user
+//     sees the change as soon as they press ESC from an article.
+//  2. On re-entry: when the user opens the same feed again, readIDs are
+//     applied to the fresh article slice before constructing articleList.
 package app
 
 import (
@@ -34,15 +41,22 @@ const (
 // It implements the tea.Model interface and is passed to tea.NewProgram.
 type Model struct {
 	active      screen
+	width       int
+	height      int
+	readIDs     map[string]bool // in-memory read state; source of truth for MVP
 	feedList    feedlist.Model
 	articleList articlelist.Model
 	articleView articleview.Model
 }
 
-// New constructs the root model, loading feeds from the data layer.
+// New constructs the root model with default terminal dimensions.
+// The real dimensions arrive via tea.WindowSizeMsg shortly after startup.
 func New() Model {
 	return Model{
 		active:   screenFeedList,
+		width:    80,
+		height:   24,
+		readIDs:  make(map[string]bool),
 		feedList: feedlist.New(data.Feeds()),
 	}
 }
@@ -54,46 +68,66 @@ func (m Model) Init() tea.Cmd {
 
 // Update is the central message handler.
 //
-// The order of handling matters:
-//  1. Global quit is checked first so it works from any screen.
-//  2. Navigation messages (emitted by screens as tea.Cmd results) switch
-//     the active screen and construct the next screen's model.
-//  3. All other messages are delegated to the active screen's Update().
+// Order of handling:
+//  1. Terminal resize — update dimensions before anything else so that
+//     newly constructed screens get the correct size.
+//  2. Global quit — works from any screen.
+//  3. Navigation messages — emitted by screens, handled here to switch screens.
+//  4. Delegation — all other messages go to the active screen's Update().
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// 1. Global quit — handled before any screen sees the message.
+	// 1. Track terminal dimensions. We do not return here — the message
+	//    continues to be processed so the active screen can also resize itself.
+	if sizeMsg, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width = sizeMsg.Width
+		m.height = sizeMsg.Height
+	}
+
+	// 2. Global quit.
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		if key.Matches(keyMsg, keymap.Default.Quit) {
 			return m, tea.Quit
 		}
 	}
 
-	// 2. Navigation messages emitted by screens.
-	//
-	// Each case constructs the target screen fresh from the relevant data,
-	// then switches active. Screens are replaced on navigation; scroll
-	// position is not preserved (accepted trade-off for MVP simplicity).
+	// 3. Navigation messages.
 	switch msg := msg.(type) {
+
 	case feedlist.FeedSelectedMsg:
+		// Build article list, applying in-memory read state to any articles
+		// the user has already read in this session.
 		articles := data.Articles(msg.Feed.ID)
+		for i, a := range articles {
+			if m.readIDs[a.ID] {
+				articles[i].IsRead = true
+			}
+		}
 		m.articleList = articlelist.New(msg.Feed, articles)
 		m.active = screenArticleList
 		return m, nil
 
 	case articlelist.ArticleSelectedMsg:
-		m.articleView = articleview.New(msg.Article)
+		// Record read state before opening the article.
+		m.readIDs[msg.Article.ID] = true
+		// Update the live list immediately so ESC returns to an up-to-date view.
+		m.articleList = m.articleList.MarkRead(msg.Article.ID)
+		// Pass current dimensions so word-wrap and scrolling are correct.
+		m.articleView = articleview.New(msg.Article, m.width, m.height)
 		m.active = screenArticleView
 		return m, nil
 
 	case articlelist.BackMsg:
+		// Return to the feed list without reconstructing it (preserves cursor).
 		m.active = screenFeedList
 		return m, nil
 
 	case articleview.BackMsg:
+		// Return to the article list without reconstructing it (preserves cursor
+		// and the read state applied by MarkRead above).
 		m.active = screenArticleList
 		return m, nil
 	}
 
-	// 3. Delegate all other messages to the active screen.
+	// 4. Delegate to the active screen.
 	switch m.active {
 	case screenFeedList:
 		var cmd tea.Cmd

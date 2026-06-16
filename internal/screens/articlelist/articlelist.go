@@ -73,9 +73,41 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
+// MarkRead returns a new Model with the article matching id marked as read.
+// This is called by app.go immediately when the user opens an article so the
+// list reflects the new state when the user navigates back.
+//
+// Note on slice copying: domain.Article is a plain struct (no reference fields),
+// so copy() produces a true independent copy — modifying elements of the new
+// slice does not affect the original.
+func (m Model) MarkRead(id string) Model {
+	articles := make([]domain.Article, len(m.articles))
+	copy(articles, m.articles)
+	for i, a := range articles {
+		if a.ID == id {
+			articles[i].IsRead = true
+			break
+		}
+	}
+	m.articles = articles
+	return m
+}
+
 // View renders the article list for the current feed.
 func (m Model) View() string {
-	s := styles.Title.Render(m.feed.Title) + "\n"
+	// Count unread for the header subtitle.
+	unread := 0
+	for _, a := range m.articles {
+		if !a.IsRead {
+			unread++
+		}
+	}
+
+	var subtitle string
+	if unread > 0 {
+		subtitle = fmt.Sprintf(" — %d unread", unread)
+	}
+	s := styles.Title.Render(m.feed.Title+subtitle) + "\n"
 
 	if len(m.articles) == 0 {
 		s += styles.Faint.Render("  No articles.") + "\n"
@@ -94,7 +126,11 @@ func (m Model) View() string {
 		}
 	}
 
-	s += styles.StatusBar.Render("j/k move  •  enter open  •  esc back  •  q quit")
+	var pos string
+	if len(m.articles) > 0 {
+		pos = fmt.Sprintf("[%d/%d]  ", m.cursor+1, len(m.articles))
+	}
+	s += styles.StatusBar.Render(pos + "j/k move  •  enter open  •  esc back  •  q quit")
 
 	return s
 }

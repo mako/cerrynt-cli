@@ -95,7 +95,11 @@ func (m Model) View() string {
 		s += line + "\n"
 	}
 
-	s += styles.StatusBar.Render("j/k move  •  enter open  •  q quit")
+	var pos string
+	if len(m.feeds) > 0 {
+		pos = fmt.Sprintf("[%d/%d]  ", m.cursor+1, len(m.feeds))
+	}
+	s += styles.StatusBar.Render(pos + "j/k move  •  enter open  •  q quit")
 
 	return s
 }
