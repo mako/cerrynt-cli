@@ -7,7 +7,6 @@ type Feed struct {
 	ID          string
 	Title       string
 	URL         string
-	UnreadCount int
 }
 
 // Article represents a single item from an RSS feed.

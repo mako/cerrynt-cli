@@ -79,19 +79,13 @@ func (m Model) View() string {
 
 	for i, feed := range m.feeds {
 		var unread string
-		if feed.UnreadCount > 0 {
-			unread = fmt.Sprintf(" (%d)", feed.UnreadCount)
-		}
 
 		line := fmt.Sprintf("  %s%s", feed.Title, unread)
 
 		if i == m.cursor {
 			// Prefix selected row with ">" and apply bold style.
 			line = styles.Selected.Render(fmt.Sprintf("> %s%s", feed.Title, unread))
-		} else if feed.UnreadCount == 0 {
-			line = styles.Faint.Render(line)
-		}
-
+		} 
 		s += line + "\n"
 	}
 

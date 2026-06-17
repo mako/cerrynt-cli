@@ -12,11 +12,11 @@ import (
 // Feeds returns a static list of mock RSS feeds.
 func Feeds() []domain.Feed {
 	return []domain.Feed{
-		{ID: "1", Title: "Hacker News", URL: "https://news.ycombinator.com/rss", UnreadCount: 12},
-		{ID: "2", Title: "Go Blog", URL: "https://go.dev/blog/feed.atom", UnreadCount: 3},
-		{ID: "3", Title: "lobste.rs", URL: "https://lobste.rs/rss", UnreadCount: 7},
-		{ID: "4", Title: "Drew DeVault's Blog", URL: "https://drewdevault.com/blog/index.xml", UnreadCount: 1},
-		{ID: "5", Title: "The Changelog", URL: "https://changelog.com/feed", UnreadCount: 0},
+		{ID: "1", Title: "Hacker News", URL: "https://news.ycombinator.com/rss"},
+		{ID: "2", Title: "Go Blog", URL: "https://go.dev/blog/feed.atom"},
+		{ID: "3", Title: "lobste.rs", URL: "https://lobste.rs/rss"},
+		{ID: "4", Title: "Drew DeVault's Blog", URL: "https://drewdevault.com/blog/index.xml"},
+		{ID: "5", Title: "The Changelog", URL: "https://changelog.com/feed"},
 	}
 }
 
