@@ -7,11 +7,11 @@ import "github.com/charmbracelet/bubbles/key"
 
 // KeyMap holds all keybindings for the application.
 type KeyMap struct {
-	Up     key.Binding
-	Down   key.Binding
-	Open   key.Binding
-	Back   key.Binding
-	Quit   key.Binding
+	Up   key.Binding
+	Down key.Binding
+	Open key.Binding
+	Back key.Binding
+	Quit key.Binding
 }
 
 // Default is the application-wide keymap with vim-style defaults.

@@ -15,6 +15,8 @@ import (
 	"github.com/mako/cerrynt-cli/internal/styles"
 )
 
+const statusRows = 2
+
 // BackMsg is emitted when the user presses ESC to return to the article list.
 type BackMsg struct{}
 
@@ -71,7 +73,6 @@ func (m Model) View() string {
 
 	// The status bar occupies 2 rows: a blank separator line + the bar text.
 	// This constant must match the literal "\n\n" prefix in the return below.
-	const statusRows = 2
 	visible := m.height - statusRows
 	if visible < 1 {
 		visible = 1
@@ -146,7 +147,6 @@ func (m Model) buildLines() []string {
 // maxOffset returns the maximum valid scroll offset for a given line count
 // and terminal height. Returns 0 if all content fits on screen.
 func maxOffset(lines []string, height int) int {
-	const statusRows = 2
 	visible := height - statusRows
 	if visible < 1 {
 		visible = 1

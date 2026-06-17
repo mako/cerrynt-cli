@@ -4,9 +4,9 @@ import "time"
 
 // Feed represents an RSS feed subscription.
 type Feed struct {
-	ID          string
-	Title       string
-	URL         string
+	ID    string
+	Title string
+	URL   string
 }
 
 // Article represents a single item from an RSS feed.
