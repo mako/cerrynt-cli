@@ -127,7 +127,6 @@ type Feed struct {
     ID          string
     Title       string
     URL         string
-    UnreadCount int
 }
 
 type Article struct {
