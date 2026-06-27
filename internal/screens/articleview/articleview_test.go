@@ -66,13 +66,13 @@ func TestMaxOffset(t *testing.T) {
 		height int
 		want   int
 	}{
-		{"content fits exactly", 8, 10, 0},     // visible=8, 8 lines → 0
-		{"content fits with room", 5, 10, 0},    // visible=8, 5 lines → 0
-		{"content overflows by 1", 9, 10, 1},    // visible=8, 9 lines → 1
-		{"content overflows by 5", 13, 10, 5},   // visible=8, 13 lines → 5
+		{"content fits exactly", 8, 10, 0},    // visible=8, 8 lines → 0
+		{"content fits with room", 5, 10, 0},  // visible=8, 5 lines → 0
+		{"content overflows by 1", 9, 10, 1},  // visible=8, 9 lines → 1
+		{"content overflows by 5", 13, 10, 5}, // visible=8, 13 lines → 5
 		{"zero lines", 0, 10, 0},
 		{"height smaller than statusRows", 3, 1, 2}, // visible clamped to 1, 3-1=2
-		{"height equals statusRows", 3, 2, 2},        // visible clamped to 1
+		{"height equals statusRows", 3, 2, 2},       // visible clamped to 1
 		{"empty height", 0, 0, 0},
 	}
 
@@ -146,9 +146,9 @@ func TestWordWrap(t *testing.T) {
 			wantLines: []string{"hi", "there!"},
 		},
 		{
-			name:      "multiple lines",
-			text:      "one two three four five",
-			width:     9,
+			name:  "multiple lines",
+			text:  "one two three four five",
+			width: 9,
 			// "one two" = 7, "three" = 5, "four" = 4, "five" = 4
 			// "one two" fits (7 ≤ 9); adding "three" → 11 > 9 → break
 			// "three four" = 10 > 9 → break after "three"
