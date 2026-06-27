@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -20,6 +21,26 @@ type Feed struct {
 	ID    string `yaml:"id"`
 	Title string `yaml:"title"`
 	URL   string `yaml:"url"`
+}
+
+// DefaultPath returns the default path for the cerrynt config file, following
+// the XDG Base Directory specification:
+//
+//   - If $XDG_CONFIG_HOME is set to an absolute path, use $XDG_CONFIG_HOME/cerrynt/config.yaml.
+//   - Otherwise fall back to $HOME/.config/cerrynt/config.yaml.
+//
+// DefaultPath only resolves the path; it does not create directories or files.
+func DefaultPath() (string, error) {
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base == "" || !filepath.IsAbs(base) {
+		// Non-absolute values are ignored per XDG spec.
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("config: resolve home directory: %w", err)
+		}
+		base = filepath.Join(home, ".config")
+	}
+	return filepath.Join(base, "cerrynt", "config.yaml"), nil
 }
 
 // Load reads and parses the YAML config file at the given path.

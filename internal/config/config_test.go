@@ -4,10 +4,80 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mako/cerrynt-cli/internal/config"
 )
+
+// -- DefaultPath tests -------------------------------------------------------
+
+func TestDefaultPath_XDGSet(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/custom/xdg")
+
+	got, err := config.DefaultPath()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := "/custom/xdg/cerrynt/config.yaml"
+	if got != want {
+		t.Errorf("DefaultPath() = %q, want %q", got, want)
+	}
+}
+
+func TestDefaultPath_XDGUnset(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "/home/testuser")
+
+	got, err := config.DefaultPath()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// We can't assert an exact path because os.UserHomeDir may use more than
+	// $HOME on some systems, but we can assert the suffix is always correct.
+	if !strings.HasSuffix(got, filepath.Join("cerrynt", "config.yaml")) {
+		t.Errorf("DefaultPath() = %q, expected suffix %q", got, filepath.Join("cerrynt", "config.yaml"))
+	}
+	if !strings.Contains(got, ".config") {
+		t.Errorf("DefaultPath() = %q, expected to contain .config", got)
+	}
+}
+
+func TestDefaultPath_XDGRelativeIgnored(t *testing.T) {
+	// Per XDG spec, relative paths must be ignored; fall back to ~/.config.
+	t.Setenv("XDG_CONFIG_HOME", "relative/path")
+
+	got, err := config.DefaultPath()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if strings.HasPrefix(got, "relative/path") {
+		t.Errorf("DefaultPath() = %q, should have ignored relative XDG_CONFIG_HOME", got)
+	}
+	if !strings.HasSuffix(got, filepath.Join("cerrynt", "config.yaml")) {
+		t.Errorf("DefaultPath() = %q, expected suffix %q", got, filepath.Join("cerrynt", "config.yaml"))
+	}
+}
+
+func TestDefaultPath_XDGAbsoluteUsed(t *testing.T) {
+	// Confirm absolute path with subdirectory structure is preserved as-is.
+	t.Setenv("XDG_CONFIG_HOME", "/srv/user/config")
+
+	got, err := config.DefaultPath()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := "/srv/user/config/cerrynt/config.yaml"
+	if got != want {
+		t.Errorf("DefaultPath() = %q, want %q", got, want)
+	}
+}
+
+// -- Load tests --------------------------------------------------------------
 
 func TestLoad_MissingFile(t *testing.T) {
 	_, err := config.Load("/nonexistent/path/config.yaml")
