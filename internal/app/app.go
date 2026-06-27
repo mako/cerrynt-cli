@@ -22,6 +22,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/mako/cerrynt-cli/internal/data"
+	"github.com/mako/cerrynt-cli/internal/domain"
 	"github.com/mako/cerrynt-cli/internal/keymap"
 	"github.com/mako/cerrynt-cli/internal/screens/articlelist"
 	"github.com/mako/cerrynt-cli/internal/screens/articleview"
@@ -49,15 +50,15 @@ type Model struct {
 	articleView articleview.Model
 }
 
-// New constructs the root model with default terminal dimensions.
-// The real dimensions arrive via tea.WindowSizeMsg shortly after startup.
-func New() Model {
+// New constructs the root model with the provided feeds.
+// The real terminal dimensions arrive via tea.WindowSizeMsg shortly after startup.
+func New(feeds []domain.Feed) Model {
 	return Model{
 		active:   screenFeedList,
 		width:    80,
 		height:   24,
 		readIDs:  make(map[string]bool),
-		feedList: feedlist.New(data.Feeds()),
+		feedList: feedlist.New(feeds),
 	}
 }
 

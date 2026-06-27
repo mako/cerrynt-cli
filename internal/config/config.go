@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/mako/cerrynt-cli/internal/domain"
 )
 
 // Config is the top-level structure of the cerrynt config file.
@@ -17,10 +19,21 @@ type Config struct {
 }
 
 // Feed represents a single RSS feed subscription as stored in config.
+// It is a configuration type only; use ToDomain() to obtain a domain.Feed
+// for use in the rest of the application.
 type Feed struct {
 	ID    string `yaml:"id"`
 	Title string `yaml:"title"`
 	URL   string `yaml:"url"`
+}
+
+// ToDomain converts a config.Feed to a domain.Feed.
+func (f Feed) ToDomain() domain.Feed {
+	return domain.Feed{
+		ID:    f.ID,
+		Title: f.Title,
+		URL:   f.URL,
+	}
 }
 
 // DefaultPath returns the default path for the cerrynt config file, following
