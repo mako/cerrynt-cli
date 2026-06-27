@@ -10,10 +10,11 @@
 // Navigation is driven by typed messages: screens emit them, app receives
 // them and switches the active screen. Screens have no knowledge of each other.
 //
-// Read state is tracked here in readIDs and applied in two ways:
+// Local application state (e.g. which articles have been read) is held in a
+// *state.State and applied in two ways:
 //  1. Immediately: articleList.MarkRead() updates the live list so the user
 //     sees the change as soon as they press ESC from an article.
-//  2. On re-entry: when the user opens the same feed again, readIDs are
+//  2. On re-entry: when the user opens the same feed again, state.Read is
 //     applied to the fresh article slice before constructing articleList.
 package app
 
@@ -27,6 +28,7 @@ import (
 	"github.com/mako/cerrynt-cli/internal/screens/articlelist"
 	"github.com/mako/cerrynt-cli/internal/screens/articleview"
 	"github.com/mako/cerrynt-cli/internal/screens/feedlist"
+	"github.com/mako/cerrynt-cli/internal/state"
 )
 
 // screen is an enum of all possible active screens.
@@ -44,21 +46,25 @@ type Model struct {
 	active      screen
 	width       int
 	height      int
-	readIDs     map[string]bool // in-memory read state; source of truth for MVP
+	st          *state.State // single source of truth for local application state
+	statePath   string       // path to persist state; empty disables persistence
 	feedList    feedlist.Model
 	articleList articlelist.Model
 	articleView articleview.Model
 }
 
-// New constructs the root model with the provided feeds.
+// New constructs the root model with the provided feeds and local state.
+// statePath is the file path used by Save; pass an empty string to disable
+// persistence (useful in tests or when no writable location is available).
 // The real terminal dimensions arrive via tea.WindowSizeMsg shortly after startup.
-func New(feeds []domain.Feed) Model {
+func New(feeds []domain.Feed, st *state.State, statePath string) Model {
 	return Model{
-		active:   screenFeedList,
-		width:    80,
-		height:   24,
-		readIDs:  make(map[string]bool),
-		feedList: feedlist.New(feeds),
+		active:    screenFeedList,
+		width:     80,
+		height:    24,
+		st:        st,
+		statePath: statePath,
+		feedList:  feedlist.New(feeds),
 	}
 }
 
@@ -94,11 +100,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case feedlist.FeedSelectedMsg:
-		// Build article list, applying in-memory read state to any articles
-		// the user has already read in this session.
+		// Build article list, applying persisted read state to each article.
 		articles := data.Articles(msg.Feed.ID)
 		for i, a := range articles {
-			if m.readIDs[a.ID] {
+			if m.st.Read[a.ID] {
 				articles[i].IsRead = true
 			}
 		}
@@ -107,8 +112,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case articlelist.ArticleSelectedMsg:
-		// Record read state before opening the article.
-		m.readIDs[msg.Article.ID] = true
+		// Mark the article as read in the shared state and persist immediately.
+		m.st.Read[msg.Article.ID] = true
+		if m.statePath != "" {
+			// Errors are intentionally ignored: the in-memory state is correct
+			// and the TUI should not crash due to a transient disk failure.
+			// A future version may surface this via a status bar notification.
+			_ = state.Save(m.statePath, m.st)
+		}
 		// Update the live list immediately so ESC returns to an up-to-date view.
 		m.articleList = m.articleList.MarkRead(msg.Article.ID)
 		// Pass current dimensions so word-wrap and scrolling are correct.

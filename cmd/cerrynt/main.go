@@ -10,6 +10,7 @@ import (
 	"github.com/mako/cerrynt-cli/internal/app"
 	"github.com/mako/cerrynt-cli/internal/config"
 	"github.com/mako/cerrynt-cli/internal/domain"
+	"github.com/mako/cerrynt-cli/internal/state"
 )
 
 func main() {
@@ -19,8 +20,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	st, statePath, err := loadState()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cerrynt: %v\n", err)
+		os.Exit(1)
+	}
+
 	p := tea.NewProgram(
-		app.New(feeds),
+		app.New(feeds, st, statePath),
 		tea.WithAltScreen(),
 	)
 
@@ -52,4 +59,26 @@ func loadFeeds() ([]domain.Feed, error) {
 		feeds[i] = f.ToDomain()
 	}
 	return feeds, nil
+}
+
+// loadState resolves the state path and loads persisted local state.
+// A missing state file is normal on first run and results in an empty State
+// rather than an error. Only unexpected errors (e.g. corrupt JSON, permission
+// denied) are returned as fatal.
+func loadState() (*state.State, string, error) {
+	path, err := state.DefaultPath()
+	if err != nil {
+		return nil, "", fmt.Errorf("resolve state path: %w", err)
+	}
+
+	st, err := state.Load(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// First run: no state file yet. Start fresh.
+			return &state.State{Read: make(map[string]bool)}, path, nil
+		}
+		return nil, "", fmt.Errorf("load state: %w", err)
+	}
+
+	return st, path, nil
 }
