@@ -53,4 +53,3 @@ func loadFeeds() ([]domain.Feed, error) {
 	}
 	return feeds, nil
 }
-
