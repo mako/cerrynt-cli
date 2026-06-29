@@ -19,8 +19,8 @@ type Client struct {
 // The client owns its http.Client with a 15-second timeout.
 func New(baseURL, token string) *Client {
 	return &Client{
-		BaseURL:    baseURL,
-		Token:      token,
+		BaseURL: baseURL,
+		Token:   token,
 		HTTPClient: &http.Client{
 			Timeout: 15 * time.Second,
 		},
