@@ -7,18 +7,18 @@
 //	FeedList → [Enter] → ArticleList → [Enter] → ArticleView
 //	               ↑ [ESC]                  ↑ [ESC]
 //
-// Navigation is driven by typed messages: screens emit them, app receives
-// them and switches the active screen. Screens have no knowledge of each other.
+// Async data flow:
 //
-// Local application state (e.g. which articles have been read) is held in a
-// *state.State and applied in two ways:
-//  1. Immediately: articleList.MarkRead() updates the live list so the user
-//     sees the change as soon as they press ESC from an article.
-//  2. On re-entry: when the user opens the same feed again, state.Read is
-//     applied to the fresh article slice before constructing articleList.
+//	Init() fires fetchFeedsCmd → FeedsLoadedMsg / FetchErrorMsg
+//	FeedSelectedMsg fires fetchArticlesCmd → ArticlesLoadedMsg / FetchErrorMsg
+//
+// All async results are handled here and pushed into screen models via
+// SetFeeds / SetArticles / SetError — screens themselves never call the store.
 package app
 
 import (
+	"context"
+
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -31,7 +31,29 @@ import (
 	"github.com/mako/cerrynt-cli/internal/state"
 )
 
-// screen is an enum of all possible active screens.
+// ── Async result messages ────────────────────────────────────────────────────
+// These are defined here because they are produced and consumed entirely within
+// this package. Screens have no knowledge of them.
+
+// FeedsLoadedMsg carries the result of an async feed fetch.
+type FeedsLoadedMsg struct {
+	Feeds []domain.Feed
+}
+
+// ArticlesLoadedMsg carries the result of an async article fetch.
+type ArticlesLoadedMsg struct {
+	Articles []domain.Article
+}
+
+// FetchErrorMsg carries an error from any failed async fetch.
+type FetchErrorMsg struct {
+	Err error
+	// target identifies which screen should display the error.
+	target screen
+}
+
+// ── Screen enum ──────────────────────────────────────────────────────────────
+
 type screen int
 
 const (
@@ -40,9 +62,12 @@ const (
 	screenArticleView
 )
 
+// ── Root model ───────────────────────────────────────────────────────────────
+
 // Model is the root Bubble Tea model.
 // It implements the tea.Model interface and is passed to tea.NewProgram.
 type Model struct {
+	store       data.Store
 	active      screen
 	width       int
 	height      int
@@ -53,37 +78,68 @@ type Model struct {
 	articleView articleview.Model
 }
 
-// New constructs the root model with the provided feeds and local state.
-// statePath is the file path used by Save; pass an empty string to disable
-// persistence (useful in tests or when no writable location is available).
-// The real terminal dimensions arrive via tea.WindowSizeMsg shortly after startup.
-func New(feeds []domain.Feed, st *state.State, statePath string) Model {
+// New constructs the root model. The feed list starts in the loading state;
+// Init() fires the first async fetch.
+func New(store data.Store, st *state.State, statePath string) Model {
 	return Model{
+		store:     store,
 		active:    screenFeedList,
 		width:     80,
 		height:    24,
 		st:        st,
 		statePath: statePath,
-		feedList:  feedlist.New(feeds),
+		feedList:  feedlist.New(),
 	}
 }
 
-// Init satisfies tea.Model. No startup commands needed.
+// Init fires the initial feed fetch and starts the feedlist spinner.
+//
+// tea.Batch runs both commands concurrently: the spinner tick keeps the
+// animation going while the fetch is in flight.
 func (m Model) Init() tea.Cmd {
-	return nil
+	return tea.Batch(
+		m.feedList.Init(), // spinner tick
+		m.fetchFeedsCmd(),
+	)
 }
+
+// fetchFeedsCmd returns a tea.Cmd that calls the store asynchronously and
+// produces either FeedsLoadedMsg or FetchErrorMsg.
+func (m Model) fetchFeedsCmd() tea.Cmd {
+	return func() tea.Msg {
+		feeds, err := m.store.Feeds(context.Background())
+		if err != nil {
+			return FetchErrorMsg{Err: err, target: screenFeedList}
+		}
+		return FeedsLoadedMsg{Feeds: feeds}
+	}
+}
+
+// fetchArticlesCmd returns a tea.Cmd that fetches articles for feedID
+// asynchronously and produces either ArticlesLoadedMsg or FetchErrorMsg.
+func (m Model) fetchArticlesCmd(feedID string) tea.Cmd {
+	return func() tea.Msg {
+		articles, err := m.store.Articles(context.Background(), feedID)
+		if err != nil {
+			return FetchErrorMsg{Err: err, target: screenArticleList}
+		}
+		return ArticlesLoadedMsg{Articles: articles}
+	}
+}
+
+// ── Update ───────────────────────────────────────────────────────────────────
 
 // Update is the central message handler.
 //
 // Order of handling:
-//  1. Terminal resize — update dimensions before anything else so that
-//     newly constructed screens get the correct size.
+//  1. Terminal resize — update dimensions before anything else.
 //  2. Global quit — works from any screen.
-//  3. Navigation messages — emitted by screens, handled here to switch screens.
-//  4. Delegation — all other messages go to the active screen's Update().
+//  3. Async result messages — FeedsLoadedMsg, ArticlesLoadedMsg, FetchErrorMsg.
+//  4. Navigation messages — emitted by screens.
+//  5. Delegation — all other messages go to the active screen.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// 1. Track terminal dimensions. We do not return here — the message
-	//    continues to be processed so the active screen can also resize itself.
+	// 1. Track terminal dimensions. Do not return — let the message continue
+	//    so the active screen can also handle it (e.g. articleview resize).
 	if sizeMsg, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width = sizeMsg.Width
 		m.height = sizeMsg.Height
@@ -96,50 +152,68 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// 3. Navigation messages.
+	// 3. Async result messages.
 	switch msg := msg.(type) {
 
-	case feedlist.FeedSelectedMsg:
-		// Build article list, applying persisted read state to each article.
-		articles := data.Articles(msg.Feed.ID)
+	case FeedsLoadedMsg:
+		m.feedList = m.feedList.SetFeeds(msg.Feeds)
+		return m, nil
+
+	case ArticlesLoadedMsg:
+		// Apply persisted read state before handing articles to the screen.
+		articles := msg.Articles
 		for i, a := range articles {
 			if m.st.Read[a.ID] {
 				articles[i].IsRead = true
 			}
 		}
-		m.articleList = articlelist.New(msg.Feed, articles)
-		m.active = screenArticleList
+		m.articleList = m.articleList.SetArticles(articles)
 		return m, nil
 
+	case FetchErrorMsg:
+		switch msg.target {
+		case screenFeedList:
+			m.feedList = m.feedList.SetError(msg.Err)
+		case screenArticleList:
+			m.articleList = m.articleList.SetError(msg.Err)
+		}
+		return m, nil
+	}
+
+	// 4. Navigation messages emitted by screens.
+	switch msg := msg.(type) {
+
+	case feedlist.FeedSelectedMsg:
+		// Switch to article list in loading state, then kick off async fetch.
+		m.articleList = articlelist.New(msg.Feed)
+		m.active = screenArticleList
+		return m, tea.Batch(
+			m.articleList.Init(), // spinner tick
+			m.fetchArticlesCmd(msg.Feed.ID),
+		)
+
 	case articlelist.ArticleSelectedMsg:
-		// Mark the article as read in the shared state and persist immediately.
+		// Mark as read in local state and persist.
 		m.st.Read[msg.Article.ID] = true
 		if m.statePath != "" {
-			// Errors are intentionally ignored: the in-memory state is correct
-			// and the TUI should not crash due to a transient disk failure.
-			// A future version may surface this via a status bar notification.
 			_ = state.Save(m.statePath, m.st)
 		}
-		// Update the live list immediately so ESC returns to an up-to-date view.
+		// Update the live list so ESC shows up-to-date read state.
 		m.articleList = m.articleList.MarkRead(msg.Article.ID)
-		// Pass current dimensions so word-wrap and scrolling are correct.
 		m.articleView = articleview.New(msg.Article, m.width, m.height)
 		m.active = screenArticleView
 		return m, nil
 
 	case articlelist.BackMsg:
-		// Return to the feed list without reconstructing it (preserves cursor).
 		m.active = screenFeedList
 		return m, nil
 
 	case articleview.BackMsg:
-		// Return to the article list without reconstructing it (preserves cursor
-		// and the read state applied by MarkRead above).
 		m.active = screenArticleList
 		return m, nil
 	}
 
-	// 4. Delegate to the active screen.
+	// 5. Delegate to the active screen.
 	switch m.active {
 	case screenFeedList:
 		var cmd tea.Cmd
@@ -159,6 +233,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	return m, nil
 }
+
+// ── View ─────────────────────────────────────────────────────────────────────
 
 // View renders the currently active screen.
 func (m Model) View() string {

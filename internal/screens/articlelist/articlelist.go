@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/mako/cerrynt-cli/internal/domain"
@@ -28,23 +29,61 @@ type Model struct {
 	feed     domain.Feed
 	articles []domain.Article
 	cursor   int
+	loading  bool
+	err      error
+	spinner  spinner.Model
 }
 
-// New constructs an articlelist Model for the given feed and its articles.
-func New(feed domain.Feed, articles []domain.Article) Model {
-	return Model{feed: feed, articles: articles}
+// New constructs an articlelist Model in the loading state for the given feed.
+// Articles are populated later via SetArticles once the async load completes.
+func New(feed domain.Feed) Model {
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	return Model{
+		feed:    feed,
+		loading: true,
+		spinner: s,
+	}
 }
 
-// Init satisfies tea.Model. No startup commands needed.
+// SetArticles returns a new Model populated with articles and no longer loading.
+func (m Model) SetArticles(articles []domain.Article) Model {
+	m.articles = articles
+	m.loading = false
+	m.err = nil
+	return m
+}
+
+// SetError returns a new Model in the error state.
+func (m Model) SetError(err error) Model {
+	m.loading = false
+	m.err = err
+	return m
+}
+
+// Init returns the spinner tick command so the spinner animates while loading.
 func (m Model) Init() tea.Cmd {
-	return nil
+	return m.spinner.Tick
 }
 
-// Update handles key input and returns navigation commands.
+// Update handles key input and spinner ticks.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	var spinCmd tea.Cmd
+	m.spinner, spinCmd = m.spinner.Update(msg)
+
+	if m.loading || m.err != nil {
+		// ESC is still handled in error/loading state so the user can go back.
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			if key.Matches(keyMsg, keymap.Default.Back) {
+				return m, func() tea.Msg { return BackMsg{} }
+			}
+		}
+		return m, spinCmd
+	}
+
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {
-		return m, nil
+		return m, spinCmd
 	}
 
 	switch {
@@ -70,7 +109,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, func() tea.Msg { return BackMsg{} }
 	}
 
-	return m, nil
+	return m, spinCmd
 }
 
 // MarkRead returns a new Model with the article matching id marked as read.
@@ -95,39 +134,48 @@ func (m Model) MarkRead(id string) Model {
 
 // View renders the article list for the current feed.
 func (m Model) View() string {
-	// Count unread for the header subtitle.
-	unread := 0
-	for _, a := range m.articles {
-		if !a.IsRead {
-			unread++
+	s := styles.Title.Render(m.feed.Title) + "\n\n"
+
+	switch {
+	case m.loading:
+		s += "  " + m.spinner.View() + " Loading articles...\n"
+
+	case m.err != nil:
+		s += styles.Faint.Render("  Error: "+m.err.Error()) + "\n"
+
+	default:
+		// Count unread for the header subtitle.
+		unread := 0
+		for _, a := range m.articles {
+			if !a.IsRead {
+				unread++
+			}
 		}
-	}
+		if unread > 0 {
+			// Re-render title with unread count now that we have data.
+			s = styles.Title.Render(fmt.Sprintf("%s — %d unread", m.feed.Title, unread)) + "\n\n"
+		}
 
-	var subtitle string
-	if unread > 0 {
-		subtitle = fmt.Sprintf(" — %d unread", unread)
-	}
-	s := styles.Title.Render(m.feed.Title+subtitle) + "\n\n"
+		if len(m.articles) == 0 {
+			s += styles.Faint.Render("  No articles.") + "\n"
+		} else {
+			for i, article := range m.articles {
+				age := formatAge(article.Published)
+				title := article.Title
 
-	if len(m.articles) == 0 {
-		s += styles.Faint.Render("  No articles.") + "\n"
-	} else {
-		for i, article := range m.articles {
-			age := formatAge(article.Published)
-			title := article.Title
-
-			if i == m.cursor {
-				s += styles.Selected.Render(fmt.Sprintf("> %s  %s", title, age)) + "\n"
-			} else if article.IsRead {
-				s += styles.Faint.Render(fmt.Sprintf("  %s  %s", title, age)) + "\n"
-			} else {
-				s += fmt.Sprintf("  %s  %s\n", title, age)
+				if i == m.cursor {
+					s += styles.Selected.Render(fmt.Sprintf("> %s  %s", title, age)) + "\n"
+				} else if article.IsRead {
+					s += styles.Faint.Render(fmt.Sprintf("  %s  %s", title, age)) + "\n"
+				} else {
+					s += fmt.Sprintf("  %s  %s\n", title, age)
+				}
 			}
 		}
 	}
 
 	var pos string
-	if len(m.articles) > 0 {
+	if !m.loading && m.err == nil && len(m.articles) > 0 {
 		pos = fmt.Sprintf("[%d/%d]  ", m.cursor+1, len(m.articles))
 	}
 	s += "\n" + styles.StatusBar.Render(pos+"j/k move  •  enter open  •  esc back  •  q quit")

@@ -61,7 +61,7 @@ func TestMarkRead(t *testing.T) {
 		{ID: "2", Title: "Second", IsRead: false},
 		{ID: "3", Title: "Third", IsRead: true},
 	}
-	original := New(domain.Feed{ID: "f1"}, articles)
+	original := New(domain.Feed{ID: "f1"}).SetArticles(articles)
 
 	t.Run("marks the correct article as read", func(t *testing.T) {
 		t.Parallel()
@@ -109,7 +109,7 @@ func TestMarkRead(t *testing.T) {
 
 	t.Run("empty article list is safe", func(t *testing.T) {
 		t.Parallel()
-		empty := New(domain.Feed{ID: "f2"}, nil)
+		empty := New(domain.Feed{ID: "f2"}).SetArticles(nil)
 		updated := empty.MarkRead("anything")
 
 		if len(updated.articles) != 0 {

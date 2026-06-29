@@ -1,12 +1,13 @@
 // Package feedlist implements the feed list screen.
 // This is the first screen the user sees. It displays all subscribed feeds
-// with their unread counts and allows the user to select one to open.
+// and allows the user to select one to open.
 package feedlist
 
 import (
 	"fmt"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/mako/cerrynt-cli/internal/domain"
@@ -22,29 +23,59 @@ type FeedSelectedMsg struct {
 
 // Model is the Bubble Tea model for the feed list screen.
 type Model struct {
-	feeds  []domain.Feed
-	cursor int
+	feeds   []domain.Feed
+	cursor  int
+	loading bool
+	err     error
+	spinner spinner.Model
 }
 
-// New constructs a feedlist Model from a slice of feeds.
-func New(feeds []domain.Feed) Model {
-	return Model{feeds: feeds}
+// New constructs a feedlist Model in the loading state.
+// Feeds are populated later via SetFeeds once the async load completes.
+func New() Model {
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	return Model{
+		loading: true,
+		spinner: s,
+	}
 }
 
-// Init satisfies the tea.Model interface. No I/O commands needed on startup.
+// SetFeeds returns a new Model populated with feeds and no longer loading.
+func (m Model) SetFeeds(feeds []domain.Feed) Model {
+	m.feeds = feeds
+	m.loading = false
+	m.err = nil
+	return m
+}
+
+// SetError returns a new Model in the error state.
+func (m Model) SetError(err error) Model {
+	m.loading = false
+	m.err = err
+	return m
+}
+
+// Init returns the spinner tick command so the spinner animates while loading.
 func (m Model) Init() tea.Cmd {
-	return nil
+	return m.spinner.Tick
 }
 
-// Update handles key presses and returns an updated model and an optional command.
-//
-// In Bubble Tea, Update() is a pure function: given a message, return the next
-// state. Side effects (network calls, navigation) are expressed as tea.Cmd
-// values — functions that run asynchronously and produce the next message.
+// Update handles key presses and spinner ticks.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	// Advance the spinner regardless of loading state — it costs nothing
+	// and avoids a special case.
+	var spinCmd tea.Cmd
+	m.spinner, spinCmd = m.spinner.Update(msg)
+
+	if m.loading || m.err != nil {
+		// Discard key input while loading or in error state.
+		return m, spinCmd
+	}
+
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {
-		return m, nil
+		return m, spinCmd
 	}
 
 	switch {
@@ -69,27 +100,32 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	}
 
-	return m, nil
+	return m, spinCmd
 }
 
-// View renders the feed list as a string. Bubble Tea calls this after every
-// Update() and replaces the terminal output with the result.
+// View renders the feed list as a string.
 func (m Model) View() string {
 	s := styles.Title.Render("Feeds") + "\n\n"
 
-	for i, feed := range m.feeds {
+	switch {
+	case m.loading:
+		s += "  " + m.spinner.View() + " Loading feeds...\n"
 
-		line := fmt.Sprintf("  %s", feed.Title)
+	case m.err != nil:
+		s += styles.Faint.Render("  Error: "+m.err.Error()) + "\n"
 
-		if i == m.cursor {
-			// Prefix selected row with ">" and apply bold style.
-			line = styles.Selected.Render(fmt.Sprintf("> %s", feed.Title))
+	default:
+		for i, feed := range m.feeds {
+			line := fmt.Sprintf("  %s", feed.Title)
+			if i == m.cursor {
+				line = styles.Selected.Render(fmt.Sprintf("> %s", feed.Title))
+			}
+			s += line + "\n"
 		}
-		s += line + "\n"
 	}
 
 	var pos string
-	if len(m.feeds) > 0 {
+	if !m.loading && m.err == nil && len(m.feeds) > 0 {
 		pos = fmt.Sprintf("[%d/%d]  ", m.cursor+1, len(m.feeds))
 	}
 	s += "\n" + styles.StatusBar.Render(pos+"j/k move  •  enter open  •  q quit")

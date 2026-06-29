@@ -9,6 +9,7 @@ import (
 
 	"github.com/mako/cerrynt-cli/internal/app"
 	"github.com/mako/cerrynt-cli/internal/config"
+	"github.com/mako/cerrynt-cli/internal/data"
 	"github.com/mako/cerrynt-cli/internal/domain"
 	"github.com/mako/cerrynt-cli/internal/state"
 )
@@ -26,8 +27,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// config is the source of truth for which feeds the user subscribes to.
+	// MockStore is given those feeds so the Store layer serves them without
+	// independently deciding what the feed list is.
+	store := data.NewMockStore(feeds)
+
 	p := tea.NewProgram(
-		app.New(feeds, st, statePath),
+		app.New(store, st, statePath),
 		tea.WithAltScreen(),
 	)
 
