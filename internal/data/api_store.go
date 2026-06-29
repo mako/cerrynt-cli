@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -23,30 +24,43 @@ func NewAPIStore(baseURL, token string) *APIStore {
 	}
 }
 
-// Feeds fetches the user's subscribed feeds from the API.
-func (s *APIStore) Feeds(ctx context.Context) ([]domain.Feed, error) {
-	reqURL := strings.TrimRight(s.client.BaseURL, "/") + "/feeds"
-	
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+// doRequest centralizes HTTP request creation, authorization, and execution.
+// It uses a callback to ensure the response body is always safely closed,
+// minimizing caller mistakes and preventing leaks.
+func (s *APIStore) doRequest(ctx context.Context, method, reqURL string, decode func(io.Reader) error) error {
+	req, err := http.NewRequestWithContext(ctx, method, reqURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("data: create feeds request: %w", err)
+		return fmt.Errorf("data: create request: %w", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+s.client.Token)
 
 	resp, err := s.client.HTTPClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("data: execute feeds request: %w", err)
+		// Let context cancellation errors propagate naturally, prefixed consistently.
+		return fmt.Errorf("data: execute request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("data: unexpected status %d", resp.StatusCode)
+		return fmt.Errorf("data: unexpected status %d", resp.StatusCode)
 	}
 
-	dtos, err := api.DecodeFeeds(resp.Body)
+	return decode(resp.Body)
+}
+
+// Feeds fetches the user's subscribed feeds from the API.
+func (s *APIStore) Feeds(ctx context.Context) ([]domain.Feed, error) {
+	reqURL := strings.TrimRight(s.client.BaseURL, "/") + "/feeds"
+
+	var dtos []api.FeedDTO
+	err := s.doRequest(ctx, http.MethodGet, reqURL, func(r io.Reader) error {
+		var decodeErr error
+		dtos, decodeErr = api.DecodeFeeds(r)
+		return decodeErr // Preserves underlying api: prefix
+	})
 	if err != nil {
-		return nil, fmt.Errorf("data: decode feeds: %w", err)
+		return nil, err
 	}
 
 	return api.MapFeeds(dtos), nil
@@ -56,27 +70,15 @@ func (s *APIStore) Feeds(ctx context.Context) ([]domain.Feed, error) {
 func (s *APIStore) Articles(ctx context.Context, feedID string) ([]domain.Article, error) {
 	path := fmt.Sprintf("/feeds/%s/articles", url.PathEscape(feedID))
 	reqURL := strings.TrimRight(s.client.BaseURL, "/") + path
-	
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+
+	var dtos []api.ArticleDTO
+	err := s.doRequest(ctx, http.MethodGet, reqURL, func(r io.Reader) error {
+		var decodeErr error
+		dtos, decodeErr = api.DecodeArticles(r)
+		return decodeErr // Preserves underlying api: prefix
+	})
 	if err != nil {
-		return nil, fmt.Errorf("data: create articles request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+s.client.Token)
-
-	resp, err := s.client.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("data: execute articles request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("data: unexpected status %d", resp.StatusCode)
-	}
-
-	dtos, err := api.DecodeArticles(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("data: decode articles: %w", err)
+		return nil, err
 	}
 
 	return api.MapArticles(dtos), nil
